@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORDLE</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /* ─── CSS VARIABLES (the color palette & font settings) ─── */
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --border: #2e2e2e;
+    --text: #f0ece0;
+    --muted: #555;
+    --green: #4caf82;
+    --yellow: #e8b84b;
+    --gray: #3a3a3a;
+    --gray-text: #888;
+    --key-bg: #2a2a2a;
+    --key-hover: #363636;
+    --radius: 6px;
+    --tile-size: clamp(52px, 11vw, 66px);
+    --gap: clamp(5px, 1.2vw, 8px);
+  }
+
+  /* ─── RESET & BASE (strip defaults, set background/font) ─── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* subtle grain texture overlay */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    width: 100%;
+    max-width: 480px;
+    padding: 20px 16px 12px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(28px, 7vw, 40px);
+    letter-spacing: 6px;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  #attempt-counter {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* ─── MAIN LAYOUT ─── */
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 20px 16px 12px;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  /* ─── MESSAGE BOX (feedback like "Not a word") ─── */
+  #message {
+    height: 28px;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--yellow);
+    text-align: center;
+    transition: opacity 0.3s;
+    opacity: 0;
+  }
+  #message.show { opacity: 1; }
+
+  /* ─── THE 6×5 GRID (6 rows of 5 tiles each) ─── */
+  #board {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+  }
+
+  .row {
+    display: flex;
+    gap: var(--gap);
+  }
+
+  /* ─── EACH TILE ─── */
+  .tile {
+    width: var(--tile-size);
+    height: var(--tile-size);
+    border: 1.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(22px, 5vw, 30px);
+    letter-spacing: 1px;
+    color: var(--text);
+    background: transparent;
+    border-radius: var(--radius);
+    transition: border-color 0.15s, transform 0.1s;
+    position: relative;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* tile "pop" when a letter is typed */
+  .tile.pop {
+    animation: pop 0.12s ease;
+  }
+  @keyframes pop {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+
+  /* tile has a letter = show border */
+  .tile.filled {
+    border-color: var(--muted);
+  }
+
+  /* tile shake when word is wrong */
+  .tile.shake {
+    animation: shake 0.45s ease;
+  }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%      { transform: translateX(-6px); }
+    40%      { transform: translateX(6px); }
+    60%      { transform: translateX(-4px); }
+    80%      { transform: translateX(4px); }
+  }
+
+  /* ─── TILE FLIP REVEAL (the 3D flip animation) ─── */
+  .tile.reveal {
+    animation: flip 0.5s ease forwards;
+  }
+  @keyframes flip {
+    0%   { transform: scaleY(1); }
+    49%  { transform: scaleY(0); }
+    50%  { transform: scaleY(0); }
+    100% { transform: scaleY(1); }
+  }
+
+  /* ─── TILE COLORS after reveal ─── */
+  .tile.correct  { background: var(--green);  border-color: var(--green);  color: #fff; }
+  .tile.present  { background: var(--yellow); border-color: var(--yellow); color: #111; }
+  .tile.absent   { background: var(--gray);   border-color: var(--gray);   color: var(--gray-text); }
+
+  /* ─── KEYBOARD ─── */
+  #keyboard {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .kb-row {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  .key {
+    height: clamp(46px, 9vw, 56px);
+    min-width: clamp(30px, 7vw, 40px);
+    padding: 0 4px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--key-bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: clamp(11px, 2.8vw, 14px);
+    font-weight: 500;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, transform 0.08s;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .key:hover  { background: var(--key-hover); transform: translateY(-1px); }
+  .key:active { transform: translateY(0); }
+  .key.wide   { min-width: clamp(50px, 12vw, 64px); font-size: clamp(9px, 2vw, 11px); }
+
+  /* Key colors update as guesses are made */
+  .key.correct { background: var(--green);  color: #fff; }
+  .key.present { background: var(--yellow); color: #111; }
+  .key.absent  { background: #222; color: #444; }
+
+  /* ─── LOADING SCREEN ─── */
+  #loader {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    z-index: 99;
+    transition: opacity 0.4s;
+  }
+  #loader.hidden { opacity: 0; pointer-events: none; }
+
+  #loader-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 36px;
+    letter-spacing: 8px;
+    color: var(--text);
+  }
+
+  #loader-msg {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── RESET BUTTON ─── */
+  #reset-btn {
+    margin-top: 4px;
+    padding: 11px 36px;
+    background: transparent;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+  #reset-btn:hover {
+    border-color: var(--text);
+    color: var(--text);
+    background: #1e1e1e;
+  }
+
+  /* ─── WIN / LOSE OVERLAY ─── */
+  #overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(6px);
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    animation: fadeIn 0.3s ease;
+  }
+  #overlay.show { display: flex; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  #overlay-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px 48px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    max-width: 320px;
+    width: 90%;
+  }
+
+  #overlay-emoji { font-size: 42px; }
+
+  #overlay-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32px;
+    letter-spacing: 4px;
+    color: var(--text);
+  }
+
+  #overlay-word {
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  #overlay-word span {
+    color: var(--green);
+    font-size: 18px;
+    letter-spacing: 5px;
+    display: block;
+    margin-top: 4px;
+  }
+
+  #overlay-reset {
+    margin-top: 8px;
+    padding: 12px 32px;
+    background: var(--green);
+    border: none;
+    border-radius: var(--radius);
+    color: #fff;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  #overlay-reset:hover { opacity: 0.85; }
+</style>
+</head>
+
+<body>
+
+<!-- ════════════════════════════════════
+     LOADING SCREEN — shown while fetching words
+════════════════════════════════════ -->
+<div id="loader">
+  <div id="loader-title">Wordle</div>
+  <div class="spinner"></div>
+  <div id="loader-msg">Loading word list…</div>
+</div>
+
+<!-- ════════════════════════════════════
+     HEADER — title + attempt counter
+════════════════════════════════════ -->
+<header>
+  <h1>Wordle</h1>
+  <span id="attempt-counter">Attempt 1 / 6</span>
+</header>
+
+<!-- ════════════════════════════════════
+     MAIN — board + keyboard + reset
+════════════════════════════════════ -->
+<main>
+
+  <!-- Small message bar for feedback (e.g. "Not in word list") -->
+  <div id="message"></div>
+
+  <!-- The 6-row × 5-column guess grid -->
+  <div id="board"></div>
+
+  <!-- On-screen keyboard -->
+  <div id="keyboard">
+    <div class="kb-row" id="kb-row-1"></div>
+    <div class="kb-row" id="kb-row-2"></div>
+    <div class="kb-row" id="kb-row-3"></div>
+  </div>
+
+  <!-- New game button -->
+  <button id="reset-btn">↺ New Game</button>
+
+</main>
+
+<!-- ════════════════════════════════════
+     END OVERLAY — win/lose popup
+════════════════════════════════════ -->
+<div id="overlay">
+  <div id="overlay-box">
+    <div id="overlay-emoji"></div>
+    <div id="overlay-title"></div>
+    <div id="overlay-word"></div>
+    <button id="overlay-reset">Play Again</button>
+  </div>
+</div>
+
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  WORD LIST — fetched from the gist at startup
+//  The raw .txt file has one 5-letter word per line.
+//  We uppercase them and store in WORD_POOL.
+// ═══════════════════════════════════════════════════════════
+const GIST_URL =
+  'https://gist.githubusercontent.com/daemondevin/df09befaf533c380743bc2c378863f0c/raw/b79b0628e79766326cdd61cc52a7222b8e5ad49a/5-letter-words.txt';
+
+let WORD_POOL = []; // filled after fetch completes
+
+// ═══════════════════════════════════════════════════════════
+//  KEYBOARD LAYOUT  (3 rows of keys, Enter & Backspace)
+// ═══════════════════════════════════════════════════════════
+const KB_LAYOUT = [
+  ['Q','W','E','R','T','Y','U','I','O','P'],
+  ['A','S','D','F','G','H','J','K','L'],
+  ['ENTER','Z','X','C','V','B','N','M','⌫']
+];
+
+// ═══════════════════════════════════════════════════════════
+//  GAME STATE  — all the variables that track what's happening
+// ═══════════════════════════════════════════════════════════
+let targetWord   = '';   // The answer word
+let currentRow   = 0;    // Which row we're filling (0–5)
+let currentCol   = 0;    // Which column/tile in that row (0–4)
+let currentGuess = [];   // Array of letters typed so far
+let gameOver     = false;// Locks input when game ends
+let tiles        = [];   // 2D array: tiles[row][col] = <div>
+let keyMap       = {};   // letter → <button> for the keyboard
+
+// ═══════════════════════════════════════════════════════════
+//  BUILD BOARD  — creates 6 rows × 5 tile divs and stores refs
+// ═══════════════════════════════════════════════════════════
+function buildBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  tiles = [];
+
+  for (let r = 0; r < 6; r++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    tiles[r] = [];
+    for (let c = 0; c < 5; c++) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      row.appendChild(tile);
+      tiles[r][c] = tile;
+    }
+    board.appendChild(row);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BUILD KEYBOARD  — renders each key button from KB_LAYOUT
+// ═══════════════════════════════════════════════════════════
+function buildKeyboard() {
+  keyMap = {};
+  KB_LAYOUT.forEach((rowKeys, i) => {
+    const rowEl = document.getElementById(`kb-row-${i + 1}`);
+    rowEl.innerHTML = '';
+    rowKeys.forEach(k => {
+      const btn = document.createElement('button');
+      btn.className = 'key' + (k.length > 1 ? ' wide' : '');
+      btn.textContent = k;
+      btn.dataset.key = k;
+      btn.addEventListener('click', () => handleKey(k));
+      rowEl.appendChild(btn);
+      if (k.length === 1) keyMap[k] = btn; // store letter keys for coloring
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SHOW MESSAGE  — flashes a short message (auto-hides)
+// ═══════════════════════════════════════════════════════════
+function showMessage(text, duration = 1800) {
+  const msg = document.getElementById('message');
+  msg.textContent = text;
+  msg.classList.add('show');
+  clearTimeout(msg._timer);
+  msg._timer = setTimeout(() => msg.classList.remove('show'), duration);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UPDATE COUNTER  — updates "Attempt X / 6"
+// ═══════════════════════════════════════════════════════════
+function updateCounter() {
+  document.getElementById('attempt-counter').textContent =
+    `Attempt ${Math.min(currentRow + 1, 6)} / 6`;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HANDLE KEY  — processes each letter, Enter, or Backspace
+// ═══════════════════════════════════════════════════════════
+function handleKey(key) {
+  if (gameOver) return;
+
+  if (key === '⌫' || key === 'BACKSPACE') {
+    // Remove last letter
+    if (currentCol === 0) return;
+    currentCol--;
+    currentGuess.pop();
+    const tile = tiles[currentRow][currentCol];
+    tile.textContent = '';
+    tile.classList.remove('filled', 'pop');
+    return;
+  }
+
+  if (key === 'ENTER') {
+    submitGuess();
+    return;
+  }
+
+  // Regular letter key
+  if (!/^[A-Z]$/.test(key)) return;
+  if (currentCol >= 5) return; // row is full
+
+  const tile = tiles[currentRow][currentCol];
+  tile.textContent = key;
+  tile.classList.add('filled');
+  // pop animation: remove then re-add to re-trigger
+  tile.classList.remove('pop');
+  void tile.offsetWidth; // force reflow
+  tile.classList.add('pop');
+
+  currentGuess.push(key);
+  currentCol++;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SUBMIT GUESS  — validates and scores the current row
+// ═══════════════════════════════════════════════════════════
+function submitGuess() {
+  if (currentCol < 5) {
+    showMessage('Not enough letters');
+    shakeTiles(currentRow);
+    return;
+  }
+
+  const guess = currentGuess.join('');
+
+  // ── WORD VALIDATION ──────────────────────────────────────
+  // Check the guess exists in the fetched word list.
+  // WORD_POOL is already uppercased, so this is a simple lookup.
+  if (!WORD_POOL.includes(guess)) {
+    showMessage('Not in word list');
+    shakeTiles(currentRow);
+    return;
+  }
+  // ─────────────────────────────────────────────────────────
+  const result = scoreGuess(guess); // get GREEN/YELLOW/GRAY for each position
+  revealRow(currentRow, result, guess);
+
+  // Check win
+  if (result.every(r => r === 'correct')) {
+    const msgs = ['Genius!','Magnificent!','Impressive!','Splendid!','Great!','Phew!'];
+    const m = msgs[Math.min(currentRow, msgs.length - 1)];
+    setTimeout(() => showOverlay(true, m), 1700);
+    gameOver = true;
+  } else if (currentRow === 5) {
+    // Last row, no win
+    setTimeout(() => showOverlay(false), 1700);
+    gameOver = true;
+  }
+
+  currentRow++;
+  currentCol = 0;
+  currentGuess = [];
+  updateCounter();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SCORE GUESS  — compares guess to targetWord
+//  Returns array like ['correct','absent','present','correct','absent']
+//  correct  = right letter, right position (green)
+//  present  = right letter, wrong position (yellow)
+//  absent   = letter not in word at all (gray)
+// ═══════════════════════════════════════════════════════════
+function scoreGuess(guess) {
+  const result = Array(5).fill('absent');
+  const targetArr = targetWord.split('');
+  const guessArr  = guess.split('');
+  const used = Array(5).fill(false); // tracks which target letters are claimed
+
+  // Pass 1: find exact matches (green)
+  for (let i = 0; i < 5; i++) {
+    if (guessArr[i] === targetArr[i]) {
+      result[i] = 'correct';
+      used[i] = true;
+    }
+  }
+
+  // Pass 2: find wrong-position matches (yellow)
+  for (let i = 0; i < 5; i++) {
+    if (result[i] === 'correct') continue;
+    for (let j = 0; j < 5; j++) {
+      if (!used[j] && guessArr[i] === targetArr[j]) {
+        result[i] = 'present';
+        used[j] = true;
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REVEAL ROW  — flips tiles one by one with a delay
+//  Also updates the keyboard key colors.
+// ═══════════════════════════════════════════════════════════
+function revealRow(row, result, guess) {
+  result.forEach((state, col) => {
+    const tile = tiles[row][col];
+    // Stagger each tile by 300ms
+    setTimeout(() => {
+      tile.classList.add('reveal');
+      // At halfway point of flip (250ms), change color
+      setTimeout(() => {
+        tile.classList.add(state);
+      }, 250);
+    }, col * 300);
+
+    // Update keyboard key color (only upgrade: correct > present > absent)
+    const letter = guess[col];
+    const keyBtn = keyMap[letter];
+    if (keyBtn) {
+      setTimeout(() => {
+        const current = keyBtn.dataset.state || '';
+        // Priority: correct beats present beats absent
+        if (current !== 'correct') {
+          if (state === 'correct' || current !== 'present') {
+            keyBtn.classList.remove('correct','present','absent');
+            keyBtn.classList.add(state);
+            keyBtn.dataset.state = state;
+          }
+        }
+      }, col * 300 + 350);
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SHAKE TILES  — wobbles a row when input is invalid
+// ═══════════════════════════════════════════════════════════
+function shakeTiles(row) {
+  for (let c = 0; c < currentCol; c++) {
+    const tile = tiles[row][c];
+    tile.classList.remove('shake');
+    void tile.offsetWidth;
+    tile.classList.add('shake');
+    tile.addEventListener('animationend', () => tile.classList.remove('shake'), { once: true });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SHOW OVERLAY  — win/lose popup with result
+// ═══════════════════════════════════════════════════════════
+function showOverlay(won, headline = '') {
+  const overlay = document.getElementById('overlay');
+  document.getElementById('overlay-emoji').textContent  = won ? '🎉' : '😔';
+  document.getElementById('overlay-title').textContent  = won ? headline : 'Game Over';
+  document.getElementById('overlay-word').innerHTML =
+    won
+    ? `Solved in <strong>${currentRow}</strong> guess${currentRow === 1 ? '' : 'es'}`
+    : `The word was<span>${targetWord}</span>`;
+  overlay.classList.add('show');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RESET  — picks a new word and clears everything
+// ═══════════════════════════════════════════════════════════
+function resetGame() {
+  targetWord   = WORD_POOL[Math.floor(Math.random() * WORD_POOL.length)];
+  currentRow   = 0;
+  currentCol   = 0;
+  currentGuess = [];
+  gameOver     = false;
+
+  buildBoard();
+  buildKeyboard();
+  updateCounter();
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('message').classList.remove('show');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  KEYBOARD INPUT  — physical keyboard listener
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toUpperCase();
+  if (k === 'ENTER')     handleKey('ENTER');
+  else if (k === 'BACKSPACE') handleKey('BACKSPACE');
+  else if (/^[A-Z]$/.test(k)) handleKey(k);
+});
+
+// ═══════════════════════════════════════════════════════════
+//  RESET BUTTONS  — wire up both reset buttons
+// ═══════════════════════════════════════════════════════════
+document.getElementById('reset-btn').addEventListener('click', resetGame);
+document.getElementById('overlay-reset').addEventListener('click', resetGame);
+
+// ═══════════════════════════════════════════════════════════
+//  BOOT — fetch word list from the gist, then start the game
+//
+//  1. fetch() downloads the raw .txt file (one word per line)
+//  2. We split on newlines, trim whitespace, uppercase, and
+//     filter to only valid 5-letter words
+//  3. If fetch fails (offline, CORS, etc.) we fall back to a
+//     small built-in emergency list so the game still runs
+// ═══════════════════════════════════════════════════════════
+const FALLBACK_WORDS = ['CRANE','SLATE','RAISE','TRACE','STONE',
+  'SCORE','BRAVE','REACH','PLANT','DRINK','BLEND','SWIFT','CRISP'];
+
+const loader    = document.getElementById('loader');
+const loaderMsg = document.getElementById('loader-msg');
+
+fetch(GIST_URL)
+  .then(res => {
+    if (!res.ok) throw new Error('Network response was not ok');
+    return res.text();
+  })
+  .then(text => {
+    // Parse: split lines, trim, uppercase, keep only 5-letter alpha words
+    WORD_POOL = [...new Set(
+      text.split('\n')
+          .map(w => w.trim().toUpperCase())
+          .filter(w => /^[A-Z]{5}$/.test(w))
+    )];
+    if (WORD_POOL.length === 0) throw new Error('Empty word list');
+    // Hide loader and start
+    loader.classList.add('hidden');
+    setTimeout(() => { loader.style.display = 'none'; }, 420);
+    resetGame();
+  })
+  .catch(() => {
+    // Fetch failed — use fallback and show a small notice
+    WORD_POOL = FALLBACK_WORDS;
+    loaderMsg.textContent = 'Offline — using backup words';
+    loaderMsg.style.color = 'var(--yellow)';
+    setTimeout(() => {
+      loader.classList.add('hidden');
+      setTimeout(() => { loader.style.display = 'none'; }, 420);
+      resetGame();
+    }, 1200);
+  });
+</script>
+
+</body>
+</html>
